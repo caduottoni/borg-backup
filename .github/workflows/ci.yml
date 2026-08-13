@@ -1,0 +1,115 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Debian 13, regressão e reprodutibilidade
+    runs-on: ubuntu-24.04
+    container:
+      image: debian:13-slim@sha256:3a39a0592364683e6bab97937b72cad5a8fa6dcbbee90edb3bb48c7f8e94f258
+    timeout-minutes: 45
+    steps:
+      - name: Preparar dependências do ambiente Debian 13
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -Eeuo pipefail
+          rm -f -- /etc/apt/sources.list.d/debian.sources
+          printf '%s\n' \
+            'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20260813T000000Z trixie main' \
+            'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/20260813T000000Z trixie-security main' \
+            >/etc/apt/sources.list
+          apt-get update
+          apt-get install --yes --no-install-recommends \
+            acl attr bash borgbackup ca-certificates coreutils diffutils findutils \
+            gawk git grep gzip libpq-dev logrotate openssh-client postgresql-17 \
+            procps rsync sed shellcheck sqlite3 systemd tar util-linux
+
+      - name: Obter o código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validar plataforma, fronteira pública e versão
+        run: |
+          set -Eeuo pipefail
+          [[ $(. /etc/os-release; printf '%s' "$VERSION_ID") == 13 ]]
+          [[ $(borg --version) =~ ^borg[[:space:]]1\.4\.[0-9]+$ ]]
+          [[ $(pg_config --version) =~ ^PostgreSQL[[:space:]]17\. ]]
+          [[ $(sqlite3 --version) =~ ^3\. ]]
+
+          for forbidden in archive deployment dist docs/installations; do
+            if [[ -e $forbidden || -L $forbidden ]]; then
+              printf 'conteúdo privado ou gerado proibido: %s\n' "$forbidden" >&2
+              exit 1
+            fi
+          done
+
+          version=$(tr -d '\r\n' <VERSION)
+          [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          runtime_version=$(sed -n 's/^declare -gr BB_VERSION="\([^"]*\)"$/\1/p' \
+            src/usr/local/lib/borg-backup/common.sh)
+          [[ $runtime_version == "$version" ]]
+          grep -Fxq $'PACKAGE_VERSION\t@PACKAGE_VERSION@' \
+            packaging/templates/PACKAGE-METADATA.tsv.in
+
+      - name: Preparar usuário isolado de teste
+        run: |
+          set -Eeuo pipefail
+          useradd --create-home --shell /bin/bash --groups users ci
+          install -D -m 0755 src/usr/local/sbin/borg-backup \
+            /usr/local/sbin/borg-backup
+          chown -R ci:ci "$GITHUB_WORKSPACE"
+
+      - name: Validar sintaxe Bash
+        run: |
+          set -Eeuo pipefail
+          mapfile -d '' scripts < <(
+            find src tests fixtures/bin packaging -type f \
+              \( -name '*.sh' -o -path '*/sbin/borg-backup' \) -print0
+          )
+          ((${#scripts[@]} > 0))
+          for script in "${scripts[@]}"; do
+            bash -n "$script"
+          done
+
+      - name: Executar regressão integral sem SKIP
+        run: |
+          set -Eeuo pipefail
+          log=$(mktemp)
+          runuser -u ci -- env HOME=/home/ci BORG_BACKUP_REQUIRE_REAL_BORG=yes \
+            ./tests/run-tests.sh | tee "$log"
+          if grep -Fq 'SKIP' "$log"; then
+            printf 'o gate integral não admite SKIP\n' >&2
+            exit 1
+          fi
+
+      - name: Produzir e comparar dois builds
+        run: |
+          set -Eeuo pipefail
+          source_date_epoch=$(runuser -u ci -- git -C "$PWD" show -s --format=%ct HEAD)
+          [[ $source_date_epoch =~ ^[0-9]+$ ]]
+          runuser -u ci -- env HOME=/home/ci SOURCE_DATE_EPOCH="$source_date_epoch" \
+            ./packaging/build-package.sh a
+          runuser -u ci -- env HOME=/home/ci SOURCE_DATE_EPOCH="$source_date_epoch" \
+            ./packaging/build-package.sh b
+          runuser -u ci -- env HOME=/home/ci ./packaging/compare-builds.sh
+          runuser -u ci -- env HOME=/home/ci SOURCE_DATE_EPOCH="$source_date_epoch" \
+            ./packaging/validate-package.sh a
+          runuser -u ci -- env HOME=/home/ci SOURCE_DATE_EPOCH="$source_date_epoch" \
+            ./packaging/validate-package.sh b

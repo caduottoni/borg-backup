@@ -1,0 +1,35 @@
+# Modelo de um único destino remoto. Copie para um nome terminado em `.conf`
+# com prefixo numérico que determine sua ordem lexical; não edite os scripts.
+
+# ID único usado em log, relatório e estado. Letras minúsculas, números e hífen.
+REPLICATION_ID=destination-example
+
+# Habilita este destino sem afetar os demais arquivos declarados.
+REPLICATION_ENABLED=yes
+
+# `yes` transforma falha em código global 2; `no` produz advertência 1 quando o
+# backup principal permaneceu válido. Todos os destinos seguintes são tentados.
+REPLICATION_REQUIRED=no
+
+# Nome DNS ou endereço previamente inventariado do receptor SSH dedicado.
+REPLICATION_HOST=server-b.example.invalid
+
+# Conta remota sem shell irrestrito, limitada por comando forçado. Cada
+# implantação deverá substituir o exemplo pela conta dedicada ao destino.
+REPLICATION_USER=replica-receiver
+
+# Porta decimal do SSH, entre 1 e 65535.
+REPLICATION_SSH_PORT=22
+
+# Raiz remota dedicada à origem. Não pode ser `/`, conter espaços ou ser
+# compartilhada com outro repositório ou rotina.
+REPLICATION_DESTINATION=/srv/borg-storage/replicas/host-example
+
+# Chave privada dedicada, sem passphrase e modo 0600. Nunca integra o archive.
+REPLICATION_IDENTITY_FILE=/etc/borg-backup/ssh/keys/destination-example
+
+# Base controlada de chaves de host; aceitação automática é proibida.
+REPLICATION_KNOWN_HOSTS_FILE=/etc/borg-backup/ssh/known_hosts
+
+# Somente `basic` é aceito nesta versão; borg check remoto não é diário.
+REPLICATION_VERIFY_MODE=basic

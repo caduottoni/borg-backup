@@ -1,0 +1,16 @@
+#!/bin/bash
+# Finalidade: produzir exportação sintética de objetos globais PostgreSQL.
+# Entradas: opções fechadas do cliente, com exportação em stdout.
+# Saídas: SQL não vazio e estritamente sintético.
+# Efeitos colaterais: somente log de operação sob a raiz controlada.
+# Dependências: Bash.
+# Privilégios: usuário comum.
+# Códigos: 1 para falha controlada; 0 em sucesso.
+# Sigilo: não processa credenciais.
+
+set -Eeuo pipefail
+umask 077
+root=${BB_BOOTSTRAP_TEST_ROOT:?raiz sintética ausente}
+[[ ! -f $root/control/pg-dumpall-fail ]] || exit 1
+printf '%s\n' '-- PostgreSQL globals synthetic fixture'
+printf 'pg_dumpall\n' >>"$root/control/database.commands"

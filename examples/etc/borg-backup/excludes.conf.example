@@ -1,0 +1,25 @@
+# Exclusões modelo passadas literalmente ao Borg, uma por linha.
+# Não use comentários ao fim da linha nem pressuponha expansão pelo shell.
+
+# Evita que o repositório tente incluir a si próprio.
+/srv/borg-storage/repositories/host-example/repo
+
+# Exclui por padrão toda a área transitória. Durante `borg create`, o código
+# abre somente a subárvore de dumps finais já validados da execução corrente;
+# staging, arquivos parciais e execuções diferentes permanecem excluídos.
+/var/tmp/borg-backup
+
+# A passphrase que abre o repositório deve ter custódia separada.
+/etc/borg-backup/secrets.conf
+
+# Chaves SSH de replicação também não podem depender do archive protegido.
+/etc/borg-backup/ssh/keys
+
+# O cache local do Borg é regenerável e não integra a recuperação do servidor.
+/var/cache/borg
+
+# Na configuração instalada, acrescente os caminhos exatos de quaisquer
+# credenciais, caches sensíveis e segredos administrativos que existam no host.
+# Não use uma fonte ampla apenas para aplicar estas exclusões.
+# /path/to/administrative-credential
+# /path/to/external-storage-passphrase

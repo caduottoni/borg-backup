@@ -1,0 +1,114 @@
+name: Preparar candidato de release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-candidate
+  cancel-in-progress: false
+
+jobs:
+  candidate:
+    name: Validar e produzir candidato
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    container:
+      image: debian:13-slim@sha256:3a39a0592364683e6bab97937b72cad5a8fa6dcbbee90edb3bb48c7f8e94f258
+    timeout-minutes: 60
+    steps:
+      - name: Preparar dependências do ambiente Debian 13
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -Eeuo pipefail
+          rm -f -- /etc/apt/sources.list.d/debian.sources
+          printf '%s\n' \
+            'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20260813T000000Z trixie main' \
+            'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/20260813T000000Z trixie-security main' \
+            >/etc/apt/sources.list
+          apt-get update
+          apt-get install --yes --no-install-recommends \
+            acl attr bash borgbackup ca-certificates coreutils diffutils findutils \
+            gawk git grep gzip libpq-dev logrotate openssh-client postgresql-17 \
+            procps rsync sed shellcheck sqlite3 systemd tar util-linux
+
+      - name: Obter o código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validar plataforma e identidade do candidato
+        run: |
+          set -Eeuo pipefail
+          [[ $(. /etc/os-release; printf '%s' "$VERSION_ID") == 13 ]]
+          [[ $(borg --version) =~ ^borg[[:space:]]1\.4\.[0-9]+$ ]]
+          [[ $(pg_config --version) =~ ^PostgreSQL[[:space:]]17\. ]]
+          [[ $(sqlite3 --version) =~ ^3\. ]]
+
+          version=$(tr -d '\r\n' <VERSION)
+          [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          runtime_version=$(sed -n 's/^declare -gr BB_VERSION="\([^"]*\)"$/\1/p' \
+            src/usr/local/lib/borg-backup/common.sh)
+          [[ $runtime_version == "$version" ]]
+          grep -Fxq $'PACKAGE_VERSION\t@PACKAGE_VERSION@' \
+            packaging/templates/PACKAGE-METADATA.tsv.in
+          grep -Fxq $'LICENSE\tGPL-3.0-or-later' \
+            packaging/templates/PACKAGE-METADATA.tsv.in
+
+      - name: Preparar usuário isolado de teste
+        run: |
+          set -Eeuo pipefail
+          useradd --create-home --shell /bin/bash --groups users ci
+          install -D -m 0755 src/usr/local/sbin/borg-backup \
+            /usr/local/sbin/borg-backup
+          chown -R ci:ci "$GITHUB_WORKSPACE"
+
+      - name: Executar regressão integral sem SKIP
+        run: |
+          set -Eeuo pipefail
+          log=$(mktemp)
+          runuser -u ci -- env HOME=/home/ci BORG_BACKUP_REQUIRE_REAL_BORG=yes \
+            ./tests/run-tests.sh | tee "$log"
+          if grep -Fq 'SKIP' "$log"; then
+            printf 'o gate de release não admite SKIP\n' >&2
+            exit 1
+          fi
+
+      - name: Construir e validar o pacote
+        id: package
+        run: |
+          set -Eeuo pipefail
+          source_date_epoch=$(runuser -u ci -- git -C "$PWD" show -s --format=%ct HEAD)
+          [[ $source_date_epoch =~ ^[0-9]+$ ]]
+          runuser -u ci -- env HOME=/home/ci SOURCE_DATE_EPOCH="$source_date_epoch" \
+            ./packaging/build-package.sh a
+          runuser -u ci -- env HOME=/home/ci SOURCE_DATE_EPOCH="$source_date_epoch" \
+            ./packaging/build-package.sh b
+          runuser -u ci -- env HOME=/home/ci ./packaging/compare-builds.sh
+          runuser -u ci -- env HOME=/home/ci SOURCE_DATE_EPOCH="$source_date_epoch" \
+            ./packaging/validate-package.sh a
+          runuser -u ci -- env HOME=/home/ci SOURCE_DATE_EPOCH="$source_date_epoch" \
+            ./packaging/validate-package.sh b
+
+          version=$(tr -d '\r\n' <VERSION)
+          archive="packaging/work/build-a/borg-backup-debian13-$version.tar.gz"
+          checksum="$archive.sha256"
+          [[ -f $archive && ! -L $archive && -f $checksum && ! -L $checksum ]]
+          (cd "$(dirname -- "$archive")" && sha256sum -c -- "$(basename -- "$checksum")")
+          printf 'version=%s\n' "$version" >>"$GITHUB_OUTPUT"
+
+      - name: Armazenar candidato temporário sem criar tag ou Release
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: borg-backup-${{ steps.package.outputs.version }}-candidate
+          path: |
+            packaging/work/build-a/borg-backup-debian13-${{ steps.package.outputs.version }}.tar.gz
+            packaging/work/build-a/borg-backup-debian13-${{ steps.package.outputs.version }}.tar.gz.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+          include-hidden-files: false

@@ -1,0 +1,16 @@
+#!/bin/bash
+# Finalidade: produzir dump PostgreSQL custom sintético para o adaptador.
+# Entradas: opções fechadas do cliente, com saída custom em stdout.
+# Saídas: marcador não vazio reconhecido pelo double pg_restore.
+# Efeitos colaterais: somente log de operação sob a raiz controlada.
+# Dependências: Bash.
+# Privilégios: usuário comum.
+# Códigos: 1 quando control/pg-dump-fail existe; 0 caso contrário.
+# Sigilo: não processa senhas e registra apenas o nome da operação.
+
+set -Eeuo pipefail
+umask 077
+root=${BB_BOOTSTRAP_TEST_ROOT:?raiz sintética ausente}
+[[ ! -f $root/control/pg-dump-fail ]] || exit 1
+printf 'PGDMP-SYNTHETIC\n'
+printf 'pg_dump\n' >>"$root/control/database.commands"

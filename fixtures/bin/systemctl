@@ -1,0 +1,49 @@
+#!/bin/bash
+# Finalidade: representar estados e transições systemd sem tocar units reais.
+# Entradas: show, is-active, stop ou start e uma unit já validada.
+# Saídas: LoadState/estado compatíveis com systemctl.
+# Efeitos colaterais: altera somente arquivos em control/services da fixture.
+# Dependências: Bash.
+# Privilégios: usuário comum.
+# Códigos: reproduz 0 para ativo/sucesso e 3 para inativo.
+# Sigilo: registra somente comando e nome sintético da unit.
+
+set -Eeuo pipefail
+umask 077
+root=${BB_BOOTSTRAP_TEST_ROOT:?raiz sintética ausente}
+mkdir -p -- "$root/control/services"
+command_name=${1:?comando obrigatório}
+unit=${!#}
+[[ $unit =~ ^[A-Za-z0-9@_.:-]+\.service$ ]] || exit 2
+state_file="$root/control/services/$unit.state"
+[[ -f $state_file ]] || printf 'active\n' >"$state_file"
+state=$(<"$state_file")
+printf '%s %s\n' "$command_name" "$unit" >>"$root/control/systemctl.commands"
+printf 'systemctl %s %s\n' "$command_name" "$unit" >>"$root/control/timeline"
+case $command_name in
+    show)
+        printf 'loaded\n'
+        ;;
+    is-active)
+        # Este failpoint ocorre somente depois que a unit ficou inativa; assim
+        # o teste distingue consulta inicial de validação pós-parada.
+        if [[ $state == "inactive" && -f $root/control/systemctl-is-active-fail-when-inactive ]]; then
+            exit 4
+        fi
+        printf '%s\n' "$state"
+        [[ $state == "active" ]] && exit 0
+        [[ $state == "inactive" ]] && exit 3
+        exit 4
+        ;;
+    stop)
+        [[ ! -f $root/control/systemctl-stop-fail ]] || exit 1
+        printf 'inactive\n' >"$state_file"
+        ;;
+    start)
+        [[ ! -f $root/control/systemctl-start-fail ]] || exit 1
+        printf 'active\n' >"$state_file"
+        ;;
+    *)
+        exit 2
+        ;;
+esac

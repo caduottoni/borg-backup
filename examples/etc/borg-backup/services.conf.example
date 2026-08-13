@@ -1,0 +1,7 @@
+# Units de aplicação que podem ser paradas, uma unit systemd por linha.
+# Não associe a unit a banco, aplicação ou etapa e não acrescente argumentos.
+
+# A rotina registra todos os estados antes da primeira parada e mantém as units
+# originalmente ativas inativas até `borg info` confirmar o archive. Rede,
+# firewall, SSH, DNS e VPN são protegidos e sempre rejeitados pelo validador.
+# app-example.service

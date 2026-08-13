@@ -1,0 +1,13 @@
+#!/bin/bash
+# Finalidade: representar ausência do mount em um caso de falha segura.
+# Entradas: argumentos ignorados do contrato `findmnt` usado pelo validador.
+# Saídas: nenhuma.
+# Efeitos colaterais: nenhum.
+# Dependências: Bash.
+# Privilégios: usuário comum.
+# Códigos: retorna 1 de forma intencional para simular mount ausente.
+# Sigilo: não processa nem registra segredos.
+
+set -Eeuo pipefail
+umask 077
+exit 1

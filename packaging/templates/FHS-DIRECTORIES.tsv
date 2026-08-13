@@ -1,0 +1,13 @@
+PATH	OWNER	GROUP	MODE	PURPOSE
+/etc/borg-backup	root	root	0750	Configuração declarativa
+/etc/borg-backup/replication.d	root	root	0750	Destinos explícitos de replicação
+/etc/borg-backup/ssh	root	root	0700	Metadados SSH dedicados
+/etc/borg-backup/ssh/keys	root	root	0700	Diretório inicialmente vazio para chaves futuras
+/usr/local/lib/borg-backup	root	root	0755	Módulos internos Bash
+/usr/local/lib/tmpfiles.d	root	root	0755	Regras locais de criação de runtime volátil
+/var/lib/borg-backup	root	root	0750	Estado persistente mínimo
+/var/lib/borg-backup/state	root	root	0750	Estado validável da rotina
+/var/lib/borg-backup/state/replication	root	root	0750	Estado por destino remoto
+/var/log/borg-backup	root	root	0750	Logs persistentes opcionais
+/var/tmp/borg-backup	root	root	0700	Áreas temporárias privadas por execução
+/run/borg-backup	root	root	0750	Lock e estado volátil recriados por tmpfiles.d

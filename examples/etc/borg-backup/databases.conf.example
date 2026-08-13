@@ -1,0 +1,17 @@
+# Bancos lógicos modelo, um registro por linha e campos separados por `|`.
+# Registros permanecem comentados até o inventário confirmar cada banco.
+
+# PostgreSQL local: tipo|id|database|usuario|socket-unix|porta.
+# `usuario` deve ser também a conta local usada por `runuser`, permitindo
+# autenticação peer sem senha. O dump será validado por `pg_restore --list`.
+# postgresql|app-example|database-example|postgres|/var/run/postgresql|5432
+
+# Objetos globais: tipo|id-do-cluster|usuario|socket-unix|porta.
+# A mesma identidade deve existir como conta local; declare somente os
+# clusters realmente necessários à restauração.
+# postgresql-globals|cluster-example|postgres|/var/run/postgresql|5432
+
+# SQLite: tipo|id|arquivo-vivo. Quando a aplicação precisar ficar inativa,
+# declare sua unit separadamente em services.conf. O arquivo, `-wal` e `-shm`
+# deverão constar nas exclusões reais.
+# sqlite|app-sqlite-example|/srv/app-example/database.sqlite3

@@ -1,0 +1,553 @@
+#!/bin/bash
+# Finalidade: oferecer a única interface administrativa da solução Borg.
+# Entradas: exatamente uma operação (`validate`, `run`, `list`, `check`,
+# `prune` ou `replicate`) e configuração declarativa em /etc/borg-backup.
+# Saídas: eventos em stderr/journal, log opcional, relatórios e estados mínimos.
+# Efeitos colaterais: `validate` apenas consulta; demais operações mutáveis usam
+# lock global e serão delegadas aos módulos específicos.
+# Dependências: Bash e módulos instalados em /usr/local/lib/borg-backup.
+# Privilégios: root em operação real; usuário comum somente no harness isolado.
+# Códigos: 0 sucesso, 1 advertência, 2 falha crítica e 64 uso inválido.
+# Sigilo: o ambiente é sanitizado e nenhuma credencial aparece em mensagens.
+
+set -Eeuo pipefail
+umask 077
+
+# Preserva somente os três controles internos necessários ao harness público
+# antes de remover variáveis herdadas das ferramentas protegidas.
+BB_BOOTSTRAP_TEST_MODE=${BORG_BACKUP_TEST_MODE:-"no"}
+BB_BOOTSTRAP_TEST_ROOT=${BORG_BACKUP_TEST_ROOT:-""}
+BB_BOOTSTRAP_TEST_BIN=${BORG_BACKUP_TEST_BIN:-""}
+export BB_BOOTSTRAP_TEST_MODE BB_BOOTSTRAP_TEST_ROOT BB_BOOTSTRAP_TEST_BIN
+BB_REQUESTED_OPERATION=""
+
+for bb_environment_name in $(compgen -v); do
+    case $bb_environment_name in
+        BORG_*|BORG_REPO|PG*|RSYNC_*|SSH_ASKPASS|SSH_AUTH_SOCK|SSH_AGENT_PID)
+            unset "$bb_environment_name"
+            ;;
+    esac
+done
+unset bb_environment_name
+
+# Funções exportadas e aliases do chamador não participam da resolução dos
+# comandos administrativos desta rotina não interativa.
+while read -r _ _ bb_function_name; do
+    unset -f "$bb_function_name" || true
+done < <(declare -F)
+unset bb_function_name
+unalias -a 2>/dev/null || true
+
+export LC_ALL=C
+export LANG=C
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+if [[ $BB_BOOTSTRAP_TEST_MODE == "yes" ]]; then
+    [[ $BB_BOOTSTRAP_TEST_BIN == /* && -d $BB_BOOTSTRAP_TEST_BIN && ! -L $BB_BOOTSTRAP_TEST_BIN ]] || {
+        printf 'borg-backup: diretório de doubles inválido\n' >&2
+        exit 2
+    }
+    case $(readlink -m -- "$BB_BOOTSTRAP_TEST_BIN") in
+        "$(readlink -m -- "$BB_BOOTSTRAP_TEST_ROOT")"/*) ;;
+        *)
+            printf 'borg-backup: doubles fora da raiz controlada\n' >&2
+            exit 2
+            ;;
+    esac
+    # O modo controlado só existe numa cópia staged da própria implementação.
+    # Assim, variáveis de ambiente não convertem o binário instalado em bypass.
+    [[ $(readlink -e -- "$0") == "$(readlink -e -- "$BB_BOOTSTRAP_TEST_ROOT")/usr/local/sbin/borg-backup" \
+        && $(readlink -e -- "$BB_BOOTSTRAP_TEST_BIN") == "$(readlink -e -- "$BB_BOOTSTRAP_TEST_ROOT")/test-bin" ]] || {
+        printf 'borg-backup: modo controlado fora de instalação staged\n' >&2
+        exit 2
+    }
+    export PATH="$BB_BOOTSTRAP_TEST_BIN:$PATH"
+fi
+
+BB_LIBRARY_DIR=/usr/local/lib/borg-backup
+if [[ $BB_BOOTSTRAP_TEST_MODE == "yes" ]]; then
+    BB_LIBRARY_DIR="$BB_BOOTSTRAP_TEST_ROOT/usr/local/lib/borg-backup"
+fi
+
+for bb_module in common.sh logging.sh config.sh services.sh applications.sh databases.sh backup.sh maintenance.sh replication.sh; do
+    [[ -f $BB_LIBRARY_DIR/$bb_module && ! -L $BB_LIBRARY_DIR/$bb_module ]] || {
+        printf 'borg-backup: módulo obrigatório ausente\n' >&2
+        exit 2
+    }
+    # Somente código administrativo instalado é carregado; configurações nunca
+    # passam por `source` ou por qualquer mecanismo equivalente.
+    source "$BB_LIBRARY_DIR/$bb_module"
+done
+unset bb_module
+
+# Exibe interface curta sem revelar detalhes da configuração local.
+# Parâmetros: nenhum.
+# Resultado: escreve ajuda em stderr.
+bb_usage() {
+    printf 'uso: borg-backup {validate|run|list|check|prune|replicate}\n' >&2
+}
+
+# Restaura recursos locais já inicializados durante saída normal ou sinal.
+# Parâmetros: nenhum.
+# Resultado: conserva a falha original; erros de limpeza são apenas diagnósticos.
+bb_entry_cleanup() {
+    local cleanup_rc=0 cleanup_needed="no" restore_state="OK"
+    if declare -F bb_restore_all_services >/dev/null 2>&1; then
+        bb_restore_all_services || { cleanup_rc=$BB_EXIT_CRITICAL; restore_state="FAILED"; }
+    fi
+    if declare -F bb_restore_all_applications >/dev/null 2>&1; then
+        bb_restore_all_applications || { cleanup_rc=$BB_EXIT_CRITICAL; restore_state="FAILED"; }
+    fi
+    if [[ ${BB_SKIP_EXECUTION_CLEANUP:-"no"} != "yes" ]]; then
+        [[ -n ${BB_EXECUTION_DIR:-} ]] && cleanup_needed="yes"
+        bb_cleanup_execution_dir || cleanup_rc=$?
+        if [[ $cleanup_needed == "yes" && $cleanup_rc == 0 && -n ${BB_LOG_FILE:-} ]]; then
+            bb_log INFO execution cleanup "temporários removidos pelo tratamento de saída" || cleanup_rc=$BB_EXIT_CRITICAL
+        fi
+    fi
+    bb_release_global_lock
+    if declare -p BB_SECRET_CONFIG >/dev/null 2>&1; then
+        unset 'BB_SECRET_CONFIG[BORG_PASSPHRASE]' 2>/dev/null || true
+    fi
+    BB_SECRET_VALUES=()
+    if [[ ${BB_REPORT_FINALIZED:-"no"} != "yes" && -n ${BB_REQUESTED_OPERATION:-} ]] \
+        && bb_validate_managed_directory "${BB_LOG_DIR:-/nonexistent}" 750 >/dev/null 2>&1; then
+        BB_REPORT_VALUES=()
+        bb_report_set EXECUTION_ID "$BB_EXECUTION_ID" || true
+        bb_report_set HOST "$(bb_safe_hostname)" || true
+        bb_report_set OPERATION "$BB_REQUESTED_OPERATION" || true
+        bb_report_set BACKUP "NOT_RUN" || true
+        bb_report_set ARCHIVE "NONE" || true
+        bb_report_set MAINTENANCE "SKIPPED" || true
+        bb_report_set REPLICATION_SUMMARY "SKIPPED" || true
+        bb_report_set RESTORE "$restore_state" || true
+        bb_report_set EXECUTION "FAILED" || true
+        bb_write_report "$BB_LOG_DIR/last-run.report" || cleanup_rc=$BB_EXIT_CRITICAL
+        BB_REPORT_FINALIZED="yes"
+    fi
+    if (( cleanup_rc != 0 )); then
+        bb_stderr "a limpeza final encontrou erro"
+    fi
+}
+
+# Converte HUP/INT/TERM em falha crítica; o trap EXIT restaura recursos.
+# Parâmetros: nome fixo do sinal.
+# Resultado: encerra com código 2 após evento resumido quando logging existe.
+bb_handle_signal() {
+    local signal_name=$1
+    if [[ -n ${BB_LOG_FILE:-} ]]; then
+        bb_log ERROR execution signal "execução interrompida por sinal=$signal_name" || true
+    else
+        bb_stderr "execução interrompida por sinal=$signal_name"
+    fi
+    exit "$BB_EXIT_CRITICAL"
+}
+
+# Inicializa configuração, logger, dependências e alvos sem alterar aplicações.
+# Parâmetros: operação administrativa.
+# Resultado: 0 e relatório-base; 2 diante de qualquer pré-condição ausente.
+bb_prepare_operation() {
+    local operation=$1 last_valid="NONE"
+    BB_CAPACITY_WARNING="no"
+    bb_validate_local_layout || return "$BB_EXIT_CRITICAL"
+    # Toda saída transitória, inclusive consultas Borg administrativas, fica na
+    # área privada capturada pelo trap desde o início da preparação.
+    [[ -n $BB_EXECUTION_DIR ]] || bb_create_execution_dir "$BB_EXECUTION_ID" || return "$BB_EXIT_CRITICAL"
+    bb_load_and_validate_configuration || return "$BB_EXIT_CRITICAL"
+    BB_FILE_LOG_ENABLED=${BB_BACKUP_CONFIG[FILE_LOG_ENABLED]}
+    bb_initialize_logging || return "$BB_EXIT_CRITICAL"
+    bb_validate_declared_dependencies || return "$BB_EXIT_CRITICAL"
+    bb_services_initialize || return "$BB_EXIT_CRITICAL"
+    bb_applications_initialize || return "$BB_EXIT_CRITICAL"
+    bb_services_validate_targets || return "$BB_EXIT_CRITICAL"
+    bb_applications_validate_targets || return "$BB_EXIT_CRITICAL"
+    bb_databases_validate_targets || return "$BB_EXIT_CRITICAL"
+    bb_validate_borg_repository || return "$BB_EXIT_CRITICAL"
+    last_valid=$(bb_state_get last-success.state ARCHIVE 2>/dev/null || printf 'NONE')
+    bb_report_set EXECUTION_ID "$BB_EXECUTION_ID"
+    bb_report_set HOST "$(bb_safe_hostname)"
+    bb_report_set OPERATION "$operation"
+    bb_report_set BACKUP "NOT_RUN"
+    bb_report_set ARCHIVE "NONE"
+    bb_report_set MAINTENANCE "NOT_RUN"
+    bb_report_set REPLICATION_SUMMARY "NOT_RUN"
+    bb_report_set CAPACITY "OK"
+    bb_report_set RESTORE "NOT_REQUIRED"
+    bb_report_set PRIMARY_FAILURE "NONE"
+    bb_report_set LAST_VALID_PRIMARY "$last_valid"
+    bb_report_set EXECUTION "IN_PROGRESS"
+    bb_log INFO execution start "operação=$operation versão=$BB_VERSION" || return "$BB_EXIT_CRITICAL"
+}
+
+# Prepara o filho executado por `borg with-lock` sem tentar adquirir outro lock.
+# Parâmetros: nenhum; consome apenas token/execução/diretório construídos pelo pai.
+# Resultado: 0 pronto para destinos; 2 para invocação direta ou caminho divergente.
+bb_prepare_internal_replication() {
+    local supplied_execution=${BB_INTERNAL_EXECUTION_ID:-""}
+    local supplied_directory=${BB_INTERNAL_EXECUTION_DIR:-""}
+    [[ ${BB_INTERNAL_REPLICATION_TOKEN:-""} == "replication-v1" ]] || return "$BB_EXIT_CRITICAL"
+    [[ $supplied_execution =~ ^[0-9]{8}T[0-9]{6}Z-[a-z0-9.-]+-[0-9]+$ ]] || return "$BB_EXIT_CRITICAL"
+    bb_validate_local_layout || return "$BB_EXIT_CRITICAL"
+    bb_path_is_within "$BB_TMP_ROOT" "$supplied_directory" || return "$BB_EXIT_CRITICAL"
+    [[ $supplied_directory != "$BB_TMP_ROOT" && -d $supplied_directory && ! -L $supplied_directory ]] || return "$BB_EXIT_CRITICAL"
+    BB_EXECUTION_ID=$supplied_execution
+    BB_EXECUTION_DIR=$(readlink -e -- "$supplied_directory") || return "$BB_EXIT_CRITICAL"
+    # O diretório pertence ao processo pai; nenhuma falha do filho pode limpá-lo.
+    BB_SKIP_EXECUTION_CLEANUP="yes"
+    BB_REPORT_FINALIZED="yes"
+    BB_REQUESTED_OPERATION=""
+    # O pai já comprovou o piso antes do ciclo. Se o próprio backup reduziu o
+    # espaço abaixo dele, a réplica da mesma execução ainda deve proteger a
+    # geração válida; somente a próxima operação será bloqueada pelo precheck.
+    BB_ENFORCE_PRIMARY_CAPACITY_PRECHECK="no"
+    bb_load_and_validate_configuration || return "$BB_EXIT_CRITICAL"
+    [[ ${BB_REPLICATION_CONFIG[REPLICATION_ENABLED]} == "yes" ]] || return "$BB_EXIT_CRITICAL"
+    BB_FILE_LOG_ENABLED=${BB_BACKUP_CONFIG[FILE_LOG_ENABLED]}
+    bb_initialize_logging || return "$BB_EXIT_CRITICAL"
+    bb_validate_declared_dependencies || return "$BB_EXIT_CRITICAL"
+}
+
+# Tenta restaurar todos os recursos mutáveis, preservando tentativas independentes.
+# Parâmetros: nenhum.
+# Resultado: 0 quando tudo restaurado; 2 depois de tentar serviços e aplicações.
+bb_restore_changed_resources() {
+    local aggregate=0
+    bb_restore_all_services || aggregate=$BB_EXIT_CRITICAL
+    bb_restore_all_applications || aggregate=$BB_EXIT_CRITICAL
+    return "$aggregate"
+}
+
+# Detecta recurso cujo estado original ainda não pôde ser restaurado.
+# Parâmetros: nenhum; consulta somente mapas internos de transição.
+# Resultado: 0 quando há pendência; 1 quando a limpeza temporária já é segura.
+bb_resources_pending_restoration() {
+    local key
+    for key in "${!BB_SERVICE_CHANGED[@]}"; do
+        [[ ${BB_SERVICE_CHANGED[$key]} == "yes" ]] && return 0
+    done
+    for key in "${!BB_NEXTCLOUD_CHANGED[@]}"; do
+        [[ ${BB_NEXTCLOUD_CHANGED[$key]} == "yes" ]] && return 0
+    done
+    return 1
+}
+
+# Persiste relatório final e estado do último backup válido quando aplicável.
+# Parâmetros: `yes` se o backup principal foi validado e código final.
+# Resultado: propaga falha de persistência como crítica.
+bb_finish_operation() {
+    local primary_valid=$1 final_rc=$2 now
+    now=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+    # Uma restauração pendente ainda precisa do staging para capturar sua saída;
+    # nesse único caso o trap EXIT faz a tentativa final antes da limpeza.
+    if ! bb_resources_pending_restoration; then
+        if bb_cleanup_execution_dir; then
+            if ! bb_log INFO execution cleanup "temporários da execução removidos"; then
+                final_rc=$BB_EXIT_CRITICAL
+                bb_report_set EXECUTION "FAILED"
+            fi
+        else
+            final_rc=$BB_EXIT_CRITICAL
+            bb_report_set EXECUTION "FAILED"
+        fi
+    fi
+    if [[ $primary_valid == "yes" ]]; then
+        bb_report_set LAST_VALID_PRIMARY "$BB_ARCHIVE_NAME"
+        bb_write_state last-success.state \
+            "EXECUTION_ID=$BB_EXECUTION_ID" \
+            "ARCHIVE=$BB_ARCHIVE_NAME" \
+            "RESULT=OK" \
+            "TIMESTAMP_UTC=$now" || return "$BB_EXIT_CRITICAL"
+    fi
+    bb_finalize_reports "$primary_valid" || return "$BB_EXIT_CRITICAL"
+    return "$final_rc"
+}
+
+# Carrega e valida a instalação sem iniciar operação Borg ou remota.
+# Parâmetros: nenhum.
+# Resultado: 0 para configuração íntegra; 2 para qualquer desvio.
+bb_command_validate() {
+    bb_validate_managed_directory "$BB_RUN_DIR" 750 || return "$BB_EXIT_CRITICAL"
+    # A validação usa borg info; compartilhar o lock evita um diagnóstico
+    # temporalmente enganoso enquanto outra operação modifica o repositório.
+    bb_acquire_global_lock || return "$BB_EXIT_CRITICAL"
+    bb_prepare_operation validate || return "$BB_EXIT_CRITICAL"
+    bb_report_set EXECUTION "OK"
+    bb_log INFO validation complete "configuração declarativa validada"
+    bb_finish_operation no "$BB_EXIT_OK"
+}
+
+# Registra falha local do ciclo e impede manutenção/replicação dependentes.
+# Parâmetros: causa resumida e estado do backup.
+# Resultado: restaura recursos, escreve relatório de falha e retorna 2.
+bb_fail_daily_run() {
+    local cause=$1 backup_state=$2
+    local restore_state="OK"
+    bb_restore_changed_resources || restore_state="FAILED"
+    bb_report_set BACKUP "$backup_state"
+    bb_report_set PRIMARY_FAILURE "$backup_state"
+    bb_report_set RESTORE "$restore_state"
+    bb_report_set MAINTENANCE "SKIPPED"
+    bb_report_set REPLICATION_SUMMARY "SKIPPED"
+    bb_report_set EXECUTION "FAILED"
+    bb_log ERROR execution failed "$cause; manutenção e replicação não executadas" || true
+    bb_finish_operation no "$BB_EXIT_CRITICAL" || true
+    return "$BB_EXIT_CRITICAL"
+}
+
+# Executa o ciclo local completo e replica somente após manutenção válida.
+# Parâmetros: nenhum.
+# Resultado: 0 sem replicação ou após sucesso local; 2 em falha crítica.
+bb_command_run() {
+    local create_rc info_rc primary_valid="no"
+    bb_validate_managed_directory "$BB_RUN_DIR" 750 || return "$BB_EXIT_CRITICAL"
+    bb_acquire_global_lock || return "$BB_EXIT_CRITICAL"
+    # A reconciliação antecede configuração, Borg e qualquer alteração de
+    # recursos. Assim, órfãos podem ser removidos mesmo quando outro precheck
+    # falhar; o lock torna desnecessário inferir atividade pela idade.
+    bb_validate_local_layout || return "$BB_EXIT_CRITICAL"
+    bb_create_execution_dir "$BB_EXECUTION_ID" || return "$BB_EXIT_CRITICAL"
+    bb_reconcile_orphaned_execution_dirs || {
+        bb_stderr "reconciliação segura de temporários foi recusada"
+        return "$BB_EXIT_CRITICAL"
+    }
+    if (( BB_ORPHANED_EXECUTION_DIRS_REMOVED > 0 )); then
+        bb_stderr "áreas temporárias órfãs removidas quantidade=$BB_ORPHANED_EXECUTION_DIRS_REMOVED"
+    fi
+
+    bb_prepare_operation run || return "$BB_EXIT_CRITICAL"
+    if (( BB_ORPHANED_EXECUTION_DIRS_REMOVED > 0 )); then
+        bb_log INFO execution cleanup \
+            "áreas temporárias órfãs removidas quantidade=$BB_ORPHANED_EXECUTION_DIRS_REMOVED" || {
+            bb_fail_daily_run "falha ao registrar reconciliação de temporários" "FAILED_TEMPORARY_RECONCILIATION" || true
+            return "$BB_EXIT_CRITICAL"
+        }
+    fi
+
+    bb_stop_declared_services || bb_fail_daily_run "falha ao interromper units declaradas" "FAILED_SERVICE_STOP" || return "$BB_EXIT_CRITICAL"
+    bb_prepare_nextcloud_applications || bb_fail_daily_run "falha ao preparar aplicação" "FAILED_PREPARATION" || return "$BB_EXIT_CRITICAL"
+    bb_dump_all_databases || bb_fail_daily_run "falha em dump lógico" "FAILED_DUMP" || return "$BB_EXIT_CRITICAL"
+    bb_sync_bind_applications || bb_fail_daily_run "falha ao sincronizar BIND" "FAILED_APPLICATION_SYNC" || return "$BB_EXIT_CRITICAL"
+
+    if bb_create_archive; then create_rc=0; else create_rc=$?; fi
+    if (( create_rc != 0 )); then
+        bb_fail_daily_run "borg create retornou rc=$create_rc" "FAILED_CREATE" || return "$BB_EXIT_CRITICAL"
+    fi
+    if bb_confirm_archive; then info_rc=0; else info_rc=$?; fi
+    if (( info_rc != 0 )); then
+        bb_fail_daily_run "borg info retornou rc=$info_rc" "FAILED_CONFIRMATION" || return "$BB_EXIT_CRITICAL"
+    fi
+    bb_restore_changed_resources || bb_fail_daily_run "falha ao restaurar estado de aplicação" "FAILED_RESTORE" || return "$BB_EXIT_CRITICAL"
+    bb_report_set RESTORE "OK"
+
+    primary_valid="yes"
+    bb_report_set BACKUP "OK"
+    bb_report_set ARCHIVE "$BB_ARCHIVE_NAME"
+    bb_run_maintenance || {
+        bb_report_set MAINTENANCE "FAILED"
+        bb_report_set REPLICATION_SUMMARY "SKIPPED"
+        bb_report_set EXECUTION "FAILED"
+        bb_log ERROR maintenance failed "replicação bloqueada após falha de manutenção" || true
+        bb_finish_operation "$primary_valid" "$BB_EXIT_CRITICAL" || true
+        return "$BB_EXIT_CRITICAL"
+    }
+    bb_report_set MAINTENANCE "OK"
+    bb_check_primary_capacity_after_operation || {
+        bb_report_set EXECUTION "FAILED"
+        bb_log ERROR capacity failed "não foi possível medir capacidade após o ciclo local" || true
+        bb_finish_operation "$primary_valid" "$BB_EXIT_CRITICAL" || true
+        return "$BB_EXIT_CRITICAL"
+    }
+
+    if [[ ${BB_REPLICATION_CONFIG[REPLICATION_ENABLED]} == "yes" ]]; then
+        local replication_rc
+        bb_log INFO replication eligible "archive, restauração e manutenção válidos" || return "$BB_EXIT_CRITICAL"
+        if bb_run_replication_with_borg_lock; then replication_rc=0; else replication_rc=$?; fi
+        case $replication_rc in
+            0)
+                if [[ $BB_CAPACITY_WARNING == "yes" ]]; then
+                    replication_rc=$BB_EXIT_WARNING
+                    bb_report_set EXECUTION "WARNING"
+                    bb_log WARNING execution warning "backup e réplicas válidos com capacidade abaixo do piso" || true
+                else
+                    bb_report_set EXECUTION "OK"
+                    bb_log INFO execution complete "backup, manutenção e replicação concluídos" || return "$BB_EXIT_CRITICAL"
+                fi
+                ;;
+            1)
+                bb_report_set EXECUTION "WARNING"
+                if [[ $BB_CAPACITY_WARNING == "yes" && $BB_REPLICATION_SUMMARY == "OK" ]]; then
+                    bb_log WARNING execution warning "backup e réplicas válidos com capacidade remota abaixo do piso" || true
+                else
+                    bb_log WARNING execution warning "backup válido com falha de réplica opcional" || true
+                fi
+                ;;
+            *)
+                if [[ $BB_REPLICATION_SUMMARY == "NOT_RUN" ]]; then
+                    bb_report_set REPLICATION_SUMMARY "FAILED_INTERNAL"
+                fi
+                bb_report_set EXECUTION "FAILED"
+                bb_log ERROR execution failed "backup válido com falha de replicação obrigatória/protocolo" || true
+                replication_rc=$BB_EXIT_CRITICAL
+                ;;
+        esac
+        if bb_finish_operation "$primary_valid" "$replication_rc"; then
+            replication_rc=0
+        else
+            replication_rc=$?
+        fi
+        return "$replication_rc"
+    fi
+    bb_report_set REPLICATION_SUMMARY "DISABLED"
+    bb_log INFO replication disabled "replicação global desabilitada por configuração" || return "$BB_EXIT_CRITICAL"
+    if [[ $BB_CAPACITY_WARNING == "yes" ]]; then
+        bb_report_set EXECUTION "WARNING"
+        bb_log WARNING execution warning "backup válido com capacidade abaixo do piso" || true
+        bb_finish_operation "$primary_valid" "$BB_EXIT_WARNING"
+    else
+        bb_report_set EXECUTION "OK"
+        bb_log INFO execution complete "backup principal e manutenção concluídos" || return "$BB_EXIT_CRITICAL"
+        bb_finish_operation "$primary_valid" "$BB_EXIT_OK"
+    fi
+}
+
+# Executa comando administrativo local sob o mesmo lock global.
+# Parâmetros: `list`, `check` ou `prune`.
+# Resultado: 0 em sucesso; 2 com relatório separado em falha.
+bb_command_repository_operation() {
+    local operation=$1 rc=0
+    bb_validate_managed_directory "$BB_RUN_DIR" 750 || return "$BB_EXIT_CRITICAL"
+    bb_acquire_global_lock || return "$BB_EXIT_CRITICAL"
+    bb_prepare_operation "$operation" || return "$BB_EXIT_CRITICAL"
+    case $operation in
+        list) bb_borg_list_archives || rc=$BB_EXIT_CRITICAL ;;
+        check) bb_borg_check_repository || rc=$BB_EXIT_CRITICAL ;;
+        prune) bb_run_maintenance || rc=$BB_EXIT_CRITICAL ;;
+        *) return "$BB_EXIT_USAGE" ;;
+    esac
+    if (( rc == 0 )); then
+        [[ $operation == "prune" ]] && bb_report_set MAINTENANCE "OK"
+        bb_report_set EXECUTION "OK"
+        bb_log INFO execution complete "operação administrativa concluída" || return "$BB_EXIT_CRITICAL"
+    else
+        [[ $operation == "prune" ]] && bb_report_set MAINTENANCE "FAILED"
+        bb_report_set EXECUTION "FAILED"
+        bb_log ERROR execution failed "operação administrativa falhou" || true
+    fi
+    bb_finish_operation no "$rc"
+}
+
+# Replica o último archive principal válido sem criar novo backup ou manutenção.
+# Parâmetros: nenhum.
+# Resultado: 0/1/2 conforme destinos desabilitados, opcionais ou obrigatórios.
+bb_command_replicate() {
+    local last_archive replication_rc info_output info_rc
+    bb_validate_managed_directory "$BB_RUN_DIR" 750 || return "$BB_EXIT_CRITICAL"
+    bb_acquire_global_lock || return "$BB_EXIT_CRITICAL"
+    bb_prepare_operation replicate || return "$BB_EXIT_CRITICAL"
+    if [[ ${BB_REPLICATION_CONFIG[REPLICATION_ENABLED]} != "yes" ]]; then
+        bb_report_set REPLICATION_SUMMARY "DISABLED"
+        bb_report_set EXECUTION "OK"
+        bb_log INFO replication disabled "replicação global desabilitada por configuração" || return "$BB_EXIT_CRITICAL"
+        bb_finish_operation no "$BB_EXIT_OK"
+        return
+    fi
+    last_archive=$(bb_state_get last-success.state ARCHIVE) || return "$BB_EXIT_CRITICAL"
+    [[ $last_archive =~ ^${BB_BACKUP_CONFIG[ARCHIVE_PREFIX]}-[0-9]{8}T[0-9]{6}Z$ ]] || return "$BB_EXIT_CRITICAL"
+    BB_ARCHIVE_NAME=$last_archive
+    bb_report_set ARCHIVE "$last_archive"
+    info_output="$BB_EXECUTION_DIR/staging/borg-info-last-success.output"
+    if bb_borg_command "$info_output" info "$BB_PRIMARY_REPOSITORY_PATH::$last_archive"; then info_rc=0; else info_rc=$?; fi
+    (( info_rc == 0 )) || return "$BB_EXIT_CRITICAL"
+    bb_log INFO replication eligible "último archive principal válido confirmado" || return "$BB_EXIT_CRITICAL"
+    if bb_run_replication_with_borg_lock; then replication_rc=0; else replication_rc=$?; fi
+    case $replication_rc in
+        0)
+            if [[ $BB_CAPACITY_WARNING == "yes" ]]; then
+                replication_rc=$BB_EXIT_WARNING
+                bb_report_set EXECUTION "WARNING"
+                bb_log WARNING execution warning "réplicas válidas com capacidade abaixo do piso" || true
+            else
+                bb_report_set EXECUTION "OK"
+                bb_log INFO execution complete "replicação explícita concluída" || return "$BB_EXIT_CRITICAL"
+            fi
+            ;;
+        1)
+            bb_report_set EXECUTION "WARNING"
+            if [[ $BB_CAPACITY_WARNING == "yes" && $BB_REPLICATION_SUMMARY == "OK" ]]; then
+                bb_log WARNING execution warning "replicação explícita válida com capacidade remota abaixo do piso" || true
+            else
+                bb_log WARNING execution warning "replicação explícita teve falha opcional" || true
+            fi
+            ;;
+        *)
+            [[ $BB_REPLICATION_SUMMARY != "NOT_RUN" ]] || bb_report_set REPLICATION_SUMMARY "FAILED_INTERNAL"
+            bb_report_set EXECUTION "FAILED"
+            bb_log ERROR execution failed "replicação explícita teve falha obrigatória/protocolo" || true
+            replication_rc=$BB_EXIT_CRITICAL
+            ;;
+    esac
+    if bb_finish_operation no "$replication_rc"; then
+        replication_rc=0
+    else
+        replication_rc=$?
+    fi
+    return "$replication_rc"
+}
+
+# Executa somente o corpo interno já protegido pelo lock Borg do processo pai.
+# Parâmetros: nenhum argumento público; autenticação ocorre por token fixo interno.
+# Resultado: propaga 0/1/2 da consolidação de destinos.
+bb_command_internal_replicate_locked() {
+    bb_prepare_internal_replication || return "$BB_EXIT_CRITICAL"
+    bb_replicate_all_destinations_locked
+}
+
+if (( $# != 1 )); then
+    bb_usage
+    exit "$BB_EXIT_USAGE"
+fi
+
+bb_operation=$1
+case $bb_operation in
+    validate|run|list|check|prune|replicate|__replicate-locked) ;;
+    *)
+        bb_usage
+        exit "$BB_EXIT_USAGE"
+        ;;
+esac
+if [[ $bb_operation == "__replicate-locked" ]]; then
+    [[ ${BB_INTERNAL_REPLICATION_TOKEN:-""} == "replication-v1" ]] || exit "$BB_EXIT_CRITICAL"
+else
+    BB_REQUESTED_OPERATION=$bb_operation
+fi
+
+bb_initialize_paths || exit "$BB_EXIT_CRITICAL"
+bb_require_administrative_context || exit "$BB_EXIT_CRITICAL"
+if [[ $bb_operation == "__replicate-locked" ]]; then
+    BB_EXECUTION_ID=${BB_INTERNAL_EXECUTION_ID:-"not-started"}
+else
+    BB_EXECUTION_ID="$(date -u +'%Y%m%dT%H%M%SZ')-$(bb_safe_hostname)-$$"
+fi
+BB_SKIP_EXECUTION_CLEANUP="no"
+trap bb_entry_cleanup EXIT
+trap 'bb_handle_signal HUP' HUP
+trap 'bb_handle_signal INT' INT
+trap 'bb_handle_signal TERM' TERM
+
+case $bb_operation in
+    validate)
+        bb_command_validate
+        ;;
+    run)
+        bb_command_run
+        ;;
+    list|check|prune)
+        bb_command_repository_operation "$bb_operation"
+        ;;
+    replicate)
+        bb_command_replicate
+        ;;
+    __replicate-locked)
+        bb_command_internal_replicate_locked
+        ;;
+esac

@@ -1,0 +1,17 @@
+#!/bin/bash
+# Finalidade: validar o marcador produzido pelo double pg_dump.
+# Entradas: `--list arquivo`.
+# Saídas: nenhuma em sucesso.
+# Efeitos colaterais: registra apenas a operação na fixture.
+# Dependências: Bash e grep.
+# Privilégios: usuário comum.
+# Códigos: 1 para marcador inválido/falha controlada; 0 em sucesso.
+# Sigilo: não imprime conteúdo do dump.
+
+set -Eeuo pipefail
+umask 077
+root=${BB_BOOTSTRAP_TEST_ROOT:?raiz sintética ausente}
+[[ ! -f $root/control/pg-restore-fail ]] || exit 1
+[[ ${1-} == "--list" && -f ${2-} ]] || exit 2
+grep -q '^PGDMP-SYNTHETIC$' "$2" || exit 1
+printf 'pg_restore-list\n' >>"$root/control/database.commands"

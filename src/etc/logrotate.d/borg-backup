@@ -1,0 +1,22 @@
+# Este bloco administra somente o log persistente da rotina.
+/var/log/borg-backup/backup.log {
+
+    # O log é rotacionado semanalmente, independentemente do timer de backup.
+    weekly
+
+    # Doze rotações oferecem aproximadamente três meses de histórico.
+    rotate 12
+
+    # Rotações antigas são comprimidas pelo mecanismo padrão do Debian.
+    compress
+
+    # A rotação mais recente permanece sem compressão até o ciclo seguinte.
+    delaycompress
+
+    # Ausência ou arquivo vazio não constituem erro de rotação.
+    missingok
+    notifempty
+
+    # Um novo log mantém leitura restrita ao administrador.
+    create 0640 root root
+}

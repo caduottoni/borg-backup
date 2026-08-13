@@ -1,0 +1,31 @@
+#!/bin/bash
+# Finalidade: double controlado de `df` para validação de espaço livre.
+# Entradas: opções fixas e caminho sob a raiz sintética.
+# Saídas: coluna `Avail`; o padrão é 65536 MiB e casos podem fornecer valores
+# literais controlados antes/depois de operações.
+# Efeitos colaterais: somente consulta marcadores sintéticos do próprio caso.
+# Dependências: Bash.
+# Privilégios: usuário comum.
+# Códigos: sempre 0 no harness autorizado.
+# Sigilo: não processa nem registra segredos.
+
+set -Eeuo pipefail
+umask 077
+
+root=${BB_BOOTSTRAP_TEST_ROOT:-}
+target=${!#}
+available=65536
+
+if [[ -n $root && -f $root/control/df-available-mib ]]; then
+    available=$(<"$root/control/df-available-mib")
+fi
+if [[ -n $root && $target == "$root"/remotes/* && -f $root/control/df-post-remote-mib \
+    && -d $target/current ]]; then
+    available=$(<"$root/control/df-post-remote-mib")
+fi
+if [[ -n $root && $target != "$root"/remotes/* && -f $root/control/df-post-local-mib \
+    && -f $root/control/borg.commands && $(tail -n 1 -- "$root/control/borg.commands") == "compact" ]]; then
+    available=$(<"$root/control/df-post-local-mib")
+fi
+[[ $available =~ ^(0|[1-9][0-9]*)$ ]] || exit 2
+printf 'Avail\n%s\n' "$available"

@@ -1,0 +1,4 @@
+# Serviço web da aplicação.
+web-app.service
+# Escritor do banco SQLite.
+sqlite-app.service

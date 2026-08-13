@@ -1,0 +1,13 @@
+#!/bin/bash
+# Finalidade: satisfazer validação de dependência; runuser double trata chamadas.
+# Entradas: nenhuma chamada direta é autorizada pelo harness.
+# Saídas: nenhuma.
+# Efeitos colaterais: nenhum.
+# Dependências: Bash.
+# Privilégios: usuário comum.
+# Códigos: 2 para denunciar chamada direta inesperada.
+# Sigilo: não processa dados.
+
+set -Eeuo pipefail
+umask 077
+exit 2

@@ -1,0 +1,6 @@
+# Fontes modelo incluídas no archive Borg, uma por linha e sem expansão shell.
+# Cada caminho deve ser absoluto, explícito e confirmado no inventário do host.
+
+# Exemplo genérico de configuração do sistema. Remova ou ajuste somente no
+# arquivo instalado; o código não contém lista própria de fontes.
+/etc

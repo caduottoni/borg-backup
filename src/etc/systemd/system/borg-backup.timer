@@ -1,0 +1,20 @@
+# Timer modelo para uma execução diária da rotina Borg Backup.
+# O horário definitivo por host será decidido apenas após o inventário futuro.
+
+[Unit]
+# Nome legível apresentado pelo systemd aos administradores.
+Description=Agendamento diário da rotina Borg Backup
+
+[Timer]
+# Executa uma vez ao dia; não codifica horário específico de uma implantação.
+OnCalendar=daily
+
+# Recupera a ocorrência perdida caso o servidor estivesse desligado.
+Persistent=true
+
+# Distribui o início por até trinta minutos sem criar paralelismo na rotina.
+RandomizedDelaySec=30m
+
+[Install]
+# A futura ativação convencional associará o timer ao alvo de timers.
+WantedBy=timers.target

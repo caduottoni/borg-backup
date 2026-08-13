@@ -1,0 +1,37 @@
+# Saídas locais de testes
+/test-runtime/
+/coverage/
+*.tap
+
+# Saídas reproduzíveis de empacotamento; releases são publicados como assets
+/packaging/work/
+/dist/
+
+# Temporários e editores
+*~
+*.bak
+*.orig
+*.rej
+*.swp
+*.swo
+.DS_Store
+.idea/
+.vscode/
+
+# Ambientes e credenciais locais: nunca use estes nomes para exemplos versionados
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Logs, dumps e bancos gerados localmente
+*.log
+*.dump
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm

@@ -1,0 +1,8 @@
+# Configuração do sistema.
+/etc
+# Código administrativo local.
+/usr/local
+# Conteúdo web explicitamente protegido.
+/var/www
+# Dados persistentes da aplicação de exemplo.
+/srv/app-data

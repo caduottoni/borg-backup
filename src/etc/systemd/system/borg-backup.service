@@ -1,0 +1,25 @@
+# Unidade modelo da rotina diária Borg Backup.
+# Este artefato pertence à futura instalação; o harness público não o instala.
+
+[Unit]
+# Nome legível apresentado pelo systemd aos administradores.
+Description=Rotina diária de backup Borg
+
+# Solicita a condição de rede utilizável sem substituir a configuração de rede.
+Wants=network-online.target
+
+# Aguarda rede declarada e filesystems locais; SSH e DNS permanecem ativos.
+After=network-online.target local-fs.target
+
+[Service]
+# A rotina tem começo e fim definidos e não mantém processo residente.
+Type=oneshot
+
+# Toda lógica operacional permanece no único ponto de entrada administrativo.
+ExecStart=/usr/local/sbin/borg-backup run
+
+# O produto não impõe limite à janela de manutenção do backup.
+TimeoutStartSec=infinity
+
+# Código 1 é advertência com backup principal válido; código 2 continua falha.
+SuccessExitStatus=0 1

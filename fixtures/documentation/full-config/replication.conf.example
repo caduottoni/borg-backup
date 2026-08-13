@@ -1,0 +1,8 @@
+# Replicação começa desabilitada até provisionamento completo.
+REPLICATION_ENABLED=no
+# Árvore local integral do repositório.
+REPLICATION_SOURCE=/srv/borg-storage/repositories/server-a/repo
+# Validação fechada de estrutura e transporte.
+REPLICATION_VERIFY_MODE=basic
+# Piso remoto de 50 GiB em MiB.
+REPLICATION_MIN_FREE_MIB=51200

@@ -1,0 +1,10 @@
+# Adaptadores técnicos modelo, um registro literal por linha.
+# Somente os tipos Nextcloud e BIND pertencem ao escopo congelado da versão 1.
+
+# Nextcloud: tipo|id|diretorio-da-aplicacao|usuario-do-occ.
+# O adaptador preserva o estado inicial do modo de manutenção.
+# nextcloud|cloud-example|/var/www/cloud-example|www-data
+
+# BIND: tipo|id|diretorio-de-estado-dinamico|usuario-do-rndc.
+# O adaptador executa sincronização online e nunca interrompe o DNS.
+# bind|dns-example|/var/lib/bind|root

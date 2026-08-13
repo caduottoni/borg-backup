@@ -1,0 +1,71 @@
+#!/bin/bash
+# Finalidade: validar opções SSH estritas e encaminhar protocolo a receptor local.
+# Entradas: opções fechadas, alvo user@host e comando remoto de uma linha.
+# Saídas: resposta curta emitida pelo replica-receiver staged.
+# Efeitos colaterais: somente árvores em remotes/ e logs sob control/.
+# Dependências: Bash e replica-receiver.sh dentro da raiz sintética.
+# Privilégios: usuário comum.
+# Códigos: propaga receptor; 255 simula transporte/host key recusado.
+# Sigilo: não lê conteúdo da chave sintética e não o registra.
+
+set -Eeuo pipefail
+umask 077
+root=${BB_BOOTSTRAP_TEST_ROOT:?raiz sintética ausente}
+
+batch=no
+identities=no
+strict=no
+forwarding=no
+tty=no
+identity=""
+known_hosts=""
+port=""
+while (( $# > 0 )); do
+    case $1 in
+        -p) port=$2; shift 2 ;;
+        -i) identity=$2; shift 2 ;;
+        -o)
+            case $2 in
+                BatchMode=yes) batch=yes ;;
+                IdentitiesOnly=yes) identities=yes ;;
+                StrictHostKeyChecking=yes) strict=yes ;;
+                UserKnownHostsFile=*) known_hosts=${2#UserKnownHostsFile=} ;;
+                ConnectTimeout=15|ConnectionAttempts=1) ;;
+                ClearAllForwardings=yes) forwarding=yes ;;
+                *) exit 255 ;;
+            esac
+            shift 2
+            ;;
+        -T) tty=yes; shift ;;
+        --) shift; break ;;
+        *) exit 255 ;;
+    esac
+done
+[[ $batch == yes && $identities == yes && $strict == yes && $forwarding == yes && $tty == yes ]] || exit 255
+[[ $port =~ ^[0-9]+$ && -f $identity && -f $known_hosts ]] || exit 255
+(( $# == 2 )) || exit 255
+target=$1
+remote_command=$2
+host=${target#*@}
+[[ $target == *@* && $host =~ ^[A-Za-z0-9.-]+$ ]] || exit 255
+grep -q "^$host " "$known_hosts" || exit 255
+[[ ! -f $root/control/ssh-fail-$host ]] || exit 255
+
+destination_file="$root/control/remote-$host.destination"
+[[ -f $destination_file ]] || exit 255
+destination=$(<"$destination_file")
+remote_base="$root/remotes/$host"
+receiver_root="$remote_base$destination"
+sentinel="$remote_base/srv/borg-storage/.borg-storage"
+printf 'ssh %s %s\n' "$host" "${remote_command%% *}" >>"$root/control/replication.commands"
+
+BB_RECEIVER_TEST_MODE=yes \
+BB_RECEIVER_TEST_BIN="$root/test-bin" \
+SSH_ORIGINAL_COMMAND="$remote_command" \
+    "$root/usr/local/lib/borg-backup/replica-receiver.sh" \
+    --root "$receiver_root" \
+    --origin lab \
+    --sentinel "$sentinel" \
+    --storage-id lab-receiver \
+    --filesystem-uuid 11111111-1111-1111-1111-111111111111 \
+    --min-free-mib 16

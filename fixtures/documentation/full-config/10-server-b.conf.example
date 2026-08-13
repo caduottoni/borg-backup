@@ -1,0 +1,20 @@
+# Identificador único do destino.
+REPLICATION_ID=server-b
+# Destino desabilitado enquanto o receptor não estiver aprovado.
+REPLICATION_ENABLED=no
+# Falha será advertência quando este valor for no.
+REPLICATION_REQUIRED=no
+# Host reservado de documentação.
+REPLICATION_HOST=server-b.example.invalid
+# Conta técnica dedicada à recepção.
+REPLICATION_USER=replica-receiver
+# Porta SSH declarada.
+REPLICATION_SSH_PORT=22
+# Raiz exclusiva da origem remota.
+REPLICATION_DESTINATION=/srv/borg-storage/replicas/server-a
+# Chave privada dedicada.
+REPLICATION_IDENTITY_FILE=/etc/borg-backup/ssh/keys/server-b
+# Base dedicada de host keys.
+REPLICATION_KNOWN_HOSTS_FILE=/etc/borg-backup/ssh/known_hosts
+# Único modo de verificação implementado.
+REPLICATION_VERIFY_MODE=basic

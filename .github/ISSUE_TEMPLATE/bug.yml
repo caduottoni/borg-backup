@@ -1,0 +1,68 @@
+name: Relatar um defeito
+description: Informe um comportamento reproduzível do produto com dados sintéticos.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Obrigado pelo relato. Não publique vulnerabilidades, segredos, logs integrais ou dados de infraestrutura real. Para vulnerabilidades, siga `SECURITY.md`.
+  - type: dropdown
+    id: version
+    attributes:
+      label: Versão
+      description: Selecione a versão na qual o problema foi observado.
+      options:
+        - "1.0.2"
+        - "main"
+        - "Outra ou desconhecida"
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Plataforma
+      description: Informe Debian, arquitetura, Bash e BorgBackup.
+      placeholder: "Debian 13 amd64; Bash 5.x; BorgBackup 1.4.x"
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Descrição
+      description: O que aconteceu e qual foi o impacto?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reprodução mínima
+      description: Use somente configuração e dados sintéticos.
+      placeholder: |
+        1. Configure...
+        2. Execute...
+        3. Observe...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Comportamento esperado
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnósticos saneados
+      description: Inclua apenas trechos mínimos, removendo paths, hostnames, IPs, UUIDs, IDs, contas e credenciais reais.
+      render: text
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmações
+      options:
+        - label: Procurei por issues existentes e li a documentação pertinente.
+          required: true
+        - label: O relato não contém segredo, dado pessoal ou informação de infraestrutura real.
+          required: true
+        - label: Isto não é um relato de vulnerabilidade de segurança.
+          required: true

@@ -1,0 +1,73 @@
+#!/bin/bash
+# Finalidade: exercer cópia/dry-run locais e simular modo servidor autorizado.
+# Entradas: opções fechadas do cliente ou argv `--server` do receptor.
+# Saídas: itemização somente quando dry-run encontra diferença.
+# Efeitos colaterais: copia para incoming sob remotes/ usando rsync real local.
+# Dependências: Bash e /usr/bin/rsync do Debian 13.
+# Privilégios: usuário comum.
+# Códigos: 0 em cópia/dry-run; arquivos control/*-fail simulam retorno 12.
+# Sigilo: não interpreta chave/known_hosts nem imprime seus caminhos.
+
+set -Eeuo pipefail
+umask 077
+root=${BB_BOOTSTRAP_TEST_ROOT:-${BB_BORG_TEST_ROOT:-}}
+[[ -n $root && -d $root ]] || exit 2
+
+if [[ ${1-} == "--server" ]]; then
+    printf 'receiver-rsync-server\n' >>"$root/control/replication.commands"
+    [[ ! -f $root/control/receiver-rsync-fail ]] || exit 12
+    if [[ -f $root/control/receiver-rsync-delay ]]; then
+        read -r receiver_delay <"$root/control/receiver-rsync-delay"
+        sleep "$receiver_delay"
+    fi
+    exit 0
+fi
+
+dry_run=no
+link_destination=""
+transport=""
+declare -a positional=()
+while (( $# > 0 )); do
+    case $1 in
+        --dry-run) dry_run=yes; shift ;;
+        --itemize-changes|--recursive|--links|--perms|--times|--hard-links|--delay-updates|--fsync)
+            shift
+            ;;
+        --partial-dir=.rsync-partial) shift ;;
+        --link-dest=*) link_destination=${1#--link-dest=}; shift ;;
+        --inplace|--delete*|--remove-source-files) exit 2 ;;
+        -e) transport=$2; shift 2 ;;
+        --*) exit 2 ;;
+        *) positional+=("$1"); shift ;;
+    esac
+done
+[[ $transport == *'BatchMode=yes'* && $transport == *'StrictHostKeyChecking=yes'* && $transport == *'IdentitiesOnly=yes'* ]] || exit 2
+(( ${#positional[@]} == 2 )) || exit 2
+source_path=${positional[0]}
+remote_spec=${positional[1]}
+target_host_part=${remote_spec%%:*}
+remote_path=${remote_spec#*:}
+host=${target_host_part#*@}
+destination_file="$root/control/remote-$host.destination"
+[[ -f $destination_file ]] || exit 2
+remote_base="$root/remotes/$host"
+physical_destination="$remote_base$remote_path"
+[[ $physical_destination == "$remote_base"/srv/borg-storage/replicas/*/incoming-*/repo/ ]] || exit 2
+
+if [[ $dry_run == "yes" ]]; then
+    printf 'rsync %s dry-run\n' "$host" >>"$root/control/replication.commands"
+    [[ ! -f $root/control/rsync-dry-fail-$host ]] || exit 12
+else
+    printf 'rsync %s transfer\n' "$host" >>"$root/control/replication.commands"
+    [[ ! -f $root/control/rsync-fail-$host ]] || exit 12
+fi
+
+declare -a local_options=(--recursive --links --perms --times --hard-links --partial-dir=.rsync-partial --delay-updates --fsync)
+if [[ -n $link_destination ]]; then
+    [[ $link_destination == /srv/borg-storage/replicas/*/current/repo ]] || exit 2
+    local_options+=("--link-dest=$remote_base$link_destination")
+fi
+if [[ $dry_run == "yes" ]]; then
+    local_options+=(--dry-run --itemize-changes)
+fi
+/usr/bin/rsync "${local_options[@]}" "$source_path" "$physical_destination"

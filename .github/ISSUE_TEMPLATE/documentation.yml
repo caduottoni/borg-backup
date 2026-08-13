@@ -1,0 +1,34 @@
+name: Corrigir a documentação
+description: Relate texto incorreto, ambíguo, incompleto ou desatualizado.
+title: "[Docs]: "
+body:
+  - type: input
+    id: document
+    attributes:
+      label: Documento e seção
+      placeholder: "docs/05-INSTALLATION.md — Gate 3"
+    validations:
+      required: true
+  - type: textarea
+    id: issue
+    attributes:
+      label: Problema
+      description: Explique por que o conteúdo atual pode induzir a erro.
+    validations:
+      required: true
+  - type: textarea
+    id: proposed_change
+    attributes:
+      label: Correção proposta
+      description: Sugira texto ou estrutura sem incluir valores de instalações reais.
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmações
+      options:
+        - label: Verifiquei a versão mais recente do documento.
+          required: true
+        - label: A proposta não contém dados internos, pessoais ou secretos.
+          required: true

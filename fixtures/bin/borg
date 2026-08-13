@@ -1,0 +1,116 @@
+#!/bin/bash
+# Finalidade: simular códigos Borg e registrar gates do fluxo em testes rápidos.
+# Entradas: subconjunto fixo das operações Borg usado pela implementação e
+# arquivos de controle sob a raiz sintética.
+# Saídas: versão/listagem sintéticas e log de nomes de operação sem segredos.
+# Efeitos colaterais: cria marcadores somente em control/borg-archives.
+# Dependências: Bash e ferramentas básicas.
+# Privilégios: usuário comum.
+# Códigos: valor definido por control/borg-<operação>.rc ou 0 por padrão.
+# Sigilo: não lê nem imprime BORG_PASSPHRASE.
+
+set -Eeuo pipefail
+umask 077
+
+# Obtém código sintético estritamente decimal para uma operação.
+# Parâmetros: nome seguro da operação.
+# Resultado: imprime o código configurado ou zero.
+stub_rc() {
+    local operation=$1 file="$root/control/borg-$1.rc" value=0
+    if [[ -f $file ]]; then
+        value=$(<"$file")
+    fi
+    [[ $value =~ ^[0-9]+$ ]] || exit 2
+    printf '%s\n' "$value"
+}
+
+# Registra somente a operação, suficiente para comprovar ordem e gates.
+# Parâmetros: nome seguro da operação.
+# Resultado: append sob a raiz sintética.
+stub_log() {
+    local operation=$1
+    printf '%s\n' "$operation" >>"$root/control/borg.commands"
+    printf 'borg %s\n' "$operation" >>"$root/control/timeline"
+}
+
+# Confirma, quando solicitado pelo caso, que as units seguem inativas durante
+# create e info do archive. O arquivo contém somente nomes sintéticos de units.
+stub_require_services_inactive() {
+    local unit state_file state
+    [[ -f $root/control/expect-services-inactive ]] || return 0
+    while IFS= read -r unit || [[ -n $unit ]]; do
+        [[ $unit =~ ^[A-Za-z0-9@_.:-]+\.service$ ]] || exit 2
+        state_file="$root/control/services/$unit.state"
+        [[ -f $state_file ]] || exit 2
+        state=$(<"$state_file")
+        [[ $state == "inactive" ]] || exit 2
+    done <"$root/control/expect-services-inactive"
+}
+
+if [[ ${1-} == "--version" ]]; then
+    printf 'borg 1.4.0\n'
+    exit 0
+fi
+
+root=${BB_BORG_TEST_ROOT:-${BB_BOOTSTRAP_TEST_ROOT:-}}
+[[ -n $root && $root == /* && -d $root ]] || exit 2
+mkdir -p -- "$root/control/borg-archives"
+
+operation=${1-}
+[[ -n $operation ]] || exit 2
+shift
+stub_log "$operation"
+
+case $operation in
+    info)
+        if [[ ${1-} == *::* ]]; then
+            stub_require_services_inactive
+            rc=$(stub_rc info-archive)
+            archive=${1#*::}
+            if (( rc == 0 )) && [[ ! -f $root/control/borg-archives/$archive ]]; then
+                rc=2
+            fi
+        else
+            rc=$(stub_rc info-repository)
+        fi
+        ;;
+    create)
+        stub_require_services_inactive
+        rc=$(stub_rc create)
+        archive=""
+        for argument in "$@"; do
+            [[ $argument == *::* ]] && archive=${argument#*::}
+        done
+        [[ $archive =~ ^[a-z0-9-]+-[0-9]{8}T[0-9]{6}Z$ ]] || exit 2
+        if [[ -f $root/control/borg-create-delay ]]; then
+            read -r delay <"$root/control/borg-create-delay"
+            sleep "$delay"
+        fi
+        if (( rc == 0 )); then
+            : >"$root/control/borg-archives/$archive"
+        fi
+        ;;
+    list)
+        rc=$(stub_rc list)
+        if (( rc == 0 )); then
+            find "$root/control/borg-archives" -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort
+        fi
+        ;;
+    prune|compact|check)
+        rc=$(stub_rc "$operation")
+        ;;
+    with-lock)
+        configured_rc=$(stub_rc with-lock)
+        if (( configured_rc != 0 )); then
+            rc=$configured_rc
+        else
+            [[ $# -ge 2 ]]
+            shift
+            if "$@"; then rc=0; else rc=$?; fi
+        fi
+        ;;
+    *)
+        exit 2
+        ;;
+esac
+exit "$rc"

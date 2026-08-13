@@ -1,0 +1,24 @@
+# Repositório local explícito.
+BORG_REPOSITORY=/srv/borg-storage/repositories/server-a/repo
+# Prefixo portátil dos archives.
+ARCHIVE_PREFIX=server-a
+# Compressão fechada da primeira versão.
+BORG_COMPRESSION=auto,zstd,3
+# Retenção diária nativa.
+KEEP_DAILY=14
+# Retenção semanal nativa.
+KEEP_WEEKLY=8
+# Retenção mensal nativa.
+KEEP_MONTHLY=12
+# UUID fictício usado apenas no exemplo validado.
+REPOSITORY_FILESYSTEM_UUID=00000000-0000-0000-0000-000000000000
+# Filesystem obrigatório.
+REPOSITORY_FILESYSTEM_TYPE=ext4
+# Identidade esperada da sentinela.
+REPOSITORY_STORAGE_ID=server-a
+# Piso inicial de 50 GiB em MiB.
+REPOSITORY_MIN_FREE_MIB=51200
+# Sentinela na raiz do mount.
+REPOSITORY_SENTINEL=/srv/borg-storage/.borg-storage
+# Log persistente habilitado.
+FILE_LOG_ENABLED=yes

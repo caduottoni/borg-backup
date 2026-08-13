@@ -1,0 +1,43 @@
+#!/bin/bash
+# Finalidade: double controlado de `findmnt` para a árvore FHS sintética.
+# Entradas: forma fixa usada pelo validador, terminando em `--target caminho`.
+# Saídas: mount, UUID e tipo ext4 coerentes com a fixture.
+# Efeitos colaterais: nenhum.
+# Dependências: Bash.
+# Privilégios: usuário comum.
+# Códigos: 0 para alvo sintético reconhecido; 1 em chamada inesperada.
+# Sigilo: não processa nem registra segredos.
+
+set -Eeuo pipefail
+umask 077
+
+target=""
+output_columns=""
+while (( $# > 0 )); do
+    if [[ $1 == "--target" && $# -ge 2 ]]; then
+        target=$2
+        shift 2
+    elif [[ $1 == "--output" && $# -ge 2 ]]; then
+        output_columns=$2
+        shift 2
+    elif [[ $1 == --output=* ]]; then
+        output_columns=${1#--output=}
+        shift
+    else
+        shift
+    fi
+done
+[[ $target == */srv/borg-storage/* ]] || exit 1
+root=${target%%/srv/borg-storage/*}
+case $output_columns in
+    TARGET,UUID,FSTYPE)
+        printf '%s %s %s\n' "$root/srv/borg-storage" \
+            '11111111-1111-1111-1111-111111111111' 'ext4'
+        ;;
+    TARGET,FSTYPE)
+        printf '%s %s\n' "$root/srv/borg-storage" 'ext4'
+        ;;
+    *)
+        exit 1
+        ;;
+esac

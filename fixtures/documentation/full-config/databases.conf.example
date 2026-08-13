@@ -1,0 +1,6 @@
+# Banco PostgreSQL por socket e autenticação local.
+postgresql|app-db|app_database|postgres|/var/run/postgresql|5432
+# Roles e tablespaces do cluster necessário à restauração.
+postgresql-globals|main-cluster|postgres|/var/run/postgresql|5432
+# Banco SQLite vivo associado a uma unit declarada.
+sqlite|local-db|/srv/app-data/database.sqlite3

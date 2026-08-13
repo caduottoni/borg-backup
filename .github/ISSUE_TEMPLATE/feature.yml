@@ -1,0 +1,44 @@
+name: Propor uma funcionalidade
+description: Descreva um caso de uso e uma mudança compatível com o escopo do projeto.
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Mudanças de arquitetura precisam explicitar riscos, compatibilidade e rollback. Não inclua dados de instalações reais.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problema ou caso de uso
+      description: Qual necessidade genérica não é atendida hoje?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposta
+      description: Descreva comportamento, interface e limites pretendidos.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternativas consideradas
+    validations:
+      required: true
+  - type: textarea
+    id: operational_impact
+    attributes:
+      label: Impacto operacional e de segurança
+      description: Considere backup, restore, lock, serviços, compatibilidade, falhas e rollback.
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmações
+      options:
+        - label: Procurei propostas equivalentes e li o escopo documentado.
+          required: true
+        - label: A proposta não depende de infraestrutura privada nem contém dados reais.
+          required: true

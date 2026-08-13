@@ -1,0 +1,16 @@
+# Impede recursão do repositório.
+/srv/borg-storage/repositories/server-a/repo
+# Exclui toda a área transitória.
+/var/tmp/borg-backup
+# Mantém a credencial Borg fora do archive.
+/etc/borg-backup/secrets.conf
+# Mantém chaves SSH privadas fora do archive.
+/etc/borg-backup/ssh/keys
+# Cache Borg regenerável.
+/var/cache/borg
+# Banco SQLite vivo; o dump validado é canônico.
+/srv/app-data/database.sqlite3
+# WAL do banco vivo.
+/srv/app-data/database.sqlite3-wal
+# SHM do banco vivo.
+/srv/app-data/database.sqlite3-shm

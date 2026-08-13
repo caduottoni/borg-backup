@@ -1,0 +1,29 @@
+#!/bin/bash
+# Finalidade: delegar `stat` real e simular owner divergente apenas em sentinela.
+# Entradas: argumentos convencionais usados pelos validadores do laboratório.
+# Saídas: metadados reais, exceto owner sintético quando o caso o solicita.
+# Efeitos colaterais: nenhum; consulta somente marcador sob a raiz controlada.
+# Dependências: Bash e /usr/bin/stat.
+# Privilégios: usuário comum.
+# Códigos: propaga o código do `stat` real ou retorna 2 para fixture inválida.
+# Sigilo: não lê conteúdo do alvo nem imprime metadados além dos solicitados.
+
+set -Eeuo pipefail
+umask 077
+
+root=${BB_BOOTSTRAP_TEST_ROOT:-}
+format=""
+target=${!#}
+for argument in "$@"; do
+    case $argument in
+        -c) ;;
+        %*) format=$argument ;;
+    esac
+done
+
+if [[ -n $root && -f $root/control/wrong-sentinel-owner \
+    && $target == */.borg-storage && $format == "%U" ]]; then
+    printf 'unexpected-owner\n'
+    exit 0
+fi
+exec /usr/bin/stat "$@"

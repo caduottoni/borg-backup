@@ -1,0 +1,61 @@
+#!/bin/bash
+# Finalidade: simular troca de usuário para PostgreSQL, Nextcloud e BIND.
+# Entradas: `-u usuario --` seguido somente de um comando técnico conhecido.
+# Saídas: delegadas aos doubles fechados ou compatíveis com `occ`.
+# Efeitos colaterais: altera somente estado e logs sintéticos sob control/.
+# Dependências: Bash.
+# Privilégios: usuário comum.
+# Códigos: 1 quando o arquivo de falha correspondente existe; 2 para comando fora
+# da lista fechada.
+# Sigilo: não processa configuração ou credencial de aplicação.
+
+set -Eeuo pipefail
+umask 077
+root=${BB_BOOTSTRAP_TEST_ROOT:?raiz sintética ausente}
+[[ ${1-} == "-u" && $# -ge 4 && ${3-} == "--" ]] || exit 2
+target_user=$2
+shift 3
+command_name=$1
+shift
+case $command_name in
+    pg_dump|pg_dumpall)
+        # O harness usa a conta corrente para não depender da criação de uma
+        # conta PostgreSQL específica no checkout ou no runner público.
+        [[ $target_user == "$(id -un)" ]] || exit 2
+        printf '%s %s\n' "$target_user" "$command_name" >>"$root/control/database-users.commands"
+        exec "$root/test-bin/$command_name" "$@"
+        ;;
+    php)
+        occ=${1-}; action=${2-}; option=${3-}
+        [[ $occ == */occ && $action == "maintenance:mode" ]] || exit 2
+        state_file="$root/control/nextcloud.state"
+        [[ -f $state_file ]] || printf 'disabled\n' >"$state_file"
+        state=$(<"$state_file")
+        case $option in
+            '')
+                # Permite falhar apenas a consulta posterior ao `--on`, para
+                # provar que o trap ainda conhece a alteração já efetivada.
+                [[ ! ( $state == "enabled" && -f $root/control/nextcloud-status-fail-when-enabled ) ]] || exit 1
+                printf 'Maintenance mode is currently %s\n' "$state"
+                ;;
+            --on)
+                [[ ! -f $root/control/nextcloud-on-fail ]] || exit 1
+                printf 'enabled\n' >"$state_file"
+                ;;
+            --off)
+                [[ ! -f $root/control/nextcloud-off-fail ]] || exit 1
+                printf 'disabled\n' >"$state_file"
+                ;;
+            *) exit 2 ;;
+        esac
+        printf 'nextcloud %s\n' "${option:-status}" >>"$root/control/application.commands"
+        ;;
+    rndc)
+        [[ ${1-} == "sync" ]] || exit 2
+        [[ ! -f $root/control/rndc-fail ]] || exit 1
+        printf 'bind sync\n' >>"$root/control/application.commands"
+        ;;
+    *)
+        exit 2
+        ;;
+esac

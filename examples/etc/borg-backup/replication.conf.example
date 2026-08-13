@@ -1,0 +1,17 @@
+# Parâmetros globais modelo da replicação fria.
+# Destinos individuais são declarados separadamente em replication.d/.
+
+# Habilita (`yes`) ou desabilita (`no`) toda a etapa. O modelo começa seguro e
+# desabilitado até que contas, chaves, host keys e destinos sejam provisionados.
+REPLICATION_ENABLED=no
+
+# A origem deve ser literalmente idêntica a BORG_REPOSITORY nesta versão.
+REPLICATION_SOURCE=/srv/borg-storage/repositories/host-example/repo
+
+# Validação fechada do contrato: conectividade, sentinela, espaço, estrutura,
+# contagem/tamanho e segundo rsync dry-run sem diferenças.
+REPLICATION_VERIFY_MODE=basic
+
+# Piso inicial remoto de 50 GiB livres, em MiB, verificado antes da
+# transferência e reavaliado depois da promoção.
+REPLICATION_MIN_FREE_MIB=51200

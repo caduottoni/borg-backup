@@ -1,0 +1,4 @@
+# Instância técnica Nextcloud de exemplo.
+nextcloud|cloud-app|/var/www/cloud-app|www-data
+# Estado dinâmico BIND sincronizado online.
+bind|dns-state|/var/lib/bind|root

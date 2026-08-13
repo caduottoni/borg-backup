@@ -1,0 +1,43 @@
+#!/bin/bash
+# Finalidade: simular dump, restauração e integrity_check SQLite em laboratório.
+# Entradas: banco e comando `.dump`/PRAGMA ou SQL recebido em stdin.
+# Saídas: dump SQL sintético ou `ok` para integridade.
+# Efeitos colaterais: cria somente banco de restauração sob staging controlado.
+# Dependências: Bash.
+# Privilégios: usuário comum.
+# Códigos: falhas são ativadas por arquivos sob control/.
+# Sigilo: não lê nenhum banco ou segredo real.
+
+set -Eeuo pipefail
+umask 077
+root=${BB_BOOTSTRAP_TEST_ROOT:?raiz sintética ausente}
+database=${1:?banco obrigatório}
+operation=${2-}
+case $operation in
+    .dump)
+        [[ ! -f $root/control/sqlite-dump-fail ]] || exit 1
+        if [[ -f $root/control/sqlite-dump-delay ]]; then
+            read -r delay <"$root/control/sqlite-dump-delay"
+            sleep "$delay"
+        fi
+        printf '%s\n' 'BEGIN TRANSACTION;' 'CREATE TABLE synthetic(id INTEGER);' 'COMMIT;'
+        printf 'sqlite-dump\n' >>"$root/control/database.commands"
+        ;;
+    'PRAGMA integrity_check;')
+        [[ ! -f $root/control/sqlite-integrity-fail ]] || {
+            printf 'corrupt\n'
+            exit 0
+        }
+        printf 'ok\n'
+        printf 'sqlite-integrity\n' >>"$root/control/database.commands"
+        ;;
+    '')
+        [[ ! -f $root/control/sqlite-restore-fail ]] || exit 1
+        cat >/dev/null
+        : >"$database"
+        printf 'sqlite-restore\n' >>"$root/control/database.commands"
+        ;;
+    *)
+        exit 2
+        ;;
+esac

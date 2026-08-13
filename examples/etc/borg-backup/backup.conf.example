@@ -1,0 +1,50 @@
+# Configuração global modelo da solução Borg Backup.
+# Este arquivo contém somente atribuições literais CHAVE=valor. Não use aspas,
+# expansão de variável, substituição de comando ou comentários ao fim da linha.
+
+# Caminho local absoluto do repositório principal. Não pode ser `/`, conter
+# espaços nem ficar sob a árvore interna da solução. O identificador de host é
+# apenas exemplo e será definido pelo inventário futuro.
+BORG_REPOSITORY=/srv/borg-storage/repositories/host-example/repo
+
+# Prefixo exclusivo dos archives. Aceita letras minúsculas ASCII, números e
+# hífen; deve ser alterado por configuração, nunca no código genérico.
+ARCHIVE_PREFIX=host-example
+
+# Compressão normativa da primeira versão. O conjunto é fechado neste release e
+# combina detecção automática com Zstandard nível 3.
+BORG_COMPRESSION=auto,zstd,3
+
+# Quantidade fixa de archives diários mantidos pelo `borg prune` nesta versão.
+KEEP_DAILY=14
+
+# Quantidade fixa de archives semanais mantidos pelo `borg prune` nesta versão.
+KEEP_WEEKLY=8
+
+# Quantidade fixa de archives mensais mantidos pelo `borg prune` nesta versão.
+KEEP_MONTHLY=12
+
+# UUID do filesystem que deve conter o repositório. O valor zero é marcador de
+# implantação e deverá ser substituído somente depois do inventário do disco.
+REPOSITORY_FILESYSTEM_UUID=00000000-0000-0000-0000-000000000000
+
+# Tipo de filesystem permitido na primeira topologia. Ext4 oferece hard links,
+# metadados POSIX e renomeação atômica exigidos pelo contrato público.
+REPOSITORY_FILESYSTEM_TYPE=ext4
+
+# Identificador esperado dentro da sentinela deste armazenamento. Use o ID
+# explícito do host na configuração instalada; o código nunca o descobre.
+REPOSITORY_STORAGE_ID=host-example
+
+# Piso inicial de 50 GiB livres, em MiB, exigido antes de iniciar o backup.
+# A calibração futura pode alterar o valor instalado, nunca a lógica central.
+REPOSITORY_MIN_FREE_MIB=51200
+
+# Sentinela localizada na raiz exata do mount do armazenamento. Durante o
+# provisionamento, deverá conter exatamente `STORAGE_ID=<id esperado>` e
+# `PURPOSE=borg-backup`, com propriedade root:root e modo 0640.
+REPOSITORY_SENTINEL=/srv/borg-storage/.borg-storage
+
+# Habilita (`yes`) ou desabilita (`no`) o log em arquivo. Eventos essenciais
+# continuam visíveis no journal por stderr quando a execução usa systemd.
+FILE_LOG_ENABLED=yes
