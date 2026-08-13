@@ -6,7 +6,7 @@ Solução declarativa de backup e replicação baseada em Bash para Debian
 GNU/Linux 13 e BorgBackup 1.4.x. O projeto privilegia falha segura, configuração
 explícita e operação auditável.
 
-Versão atual: **1.0.2**, preparada como o primeiro release público.
+Versão atual: **1.0.2**, o primeiro release público do projeto.
 
 ## O que o projeto oferece
 
@@ -120,5 +120,5 @@ operational evidence. Review the [technical documentation](docs/README.md),
 [security policy](SECURITY.md), [support policy](SUPPORT.md), and
 [contribution guide](CONTRIBUTING.md) before use.
 
-Version 1.0.2 is prepared as the first public release. The project is licensed
+Version 1.0.2 is the project's first public release. The project is licensed
 under `GPL-3.0-or-later`.
