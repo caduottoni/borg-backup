@@ -6,10 +6,9 @@ versionamento segue [Semantic Versioning](https://semver.org/lang/pt-BR/).
 
 ## [Unreleased]
 
-Conteúdo candidato à versão **1.0.2**, planejada como o primeiro release
-público. A data somente será registrada no pull request final, antes da tag. A
-publicação efetiva e a criação de um GitHub Release continuam sujeitas a gate
-administrativo separado.
+## [1.0.2] - 2026-08-13
+
+Primeiro release público do projeto.
 
 ### Adicionado
 
@@ -33,3 +32,6 @@ administrativo separado.
 - proibida a inclusão de dados de infraestrutura real, credenciais e evidências
   operacionais no repositório público;
 - definido reporte privado e coordenado de vulnerabilidades.
+
+[Unreleased]: https://github.com/caduottoni/borg-backup/compare/v1.0.2...HEAD
+[1.0.2]: https://github.com/caduottoni/borg-backup/releases/tag/v1.0.2
