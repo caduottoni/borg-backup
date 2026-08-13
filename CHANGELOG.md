@@ -22,6 +22,8 @@ administrativo separado.
 ### Alterado
 
 - identidade do produto alinhada em `1.0.2` para o primeiro release público;
+- workflows declaram Bash explicitamente também em jobs executados dentro do
+  container Debian 13;
 - documentação e exemplos separados de evidências e instalações privadas.
 
 ### Segurança
