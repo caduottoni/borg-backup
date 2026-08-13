@@ -43,17 +43,21 @@ test_equals 'd /run/borg-backup 0750 root root -' \
     "$(active_configuration "$PROJECT_ROOT/src/usr/local/lib/tmpfiles.d/borg-backup.conf")" \
     "tmpfiles recria o runtime volátil com owner e modo normativos"
 
-integration_modes=yes
+integration_checkout_modes=yes
 for artifact in \
     "$PROJECT_ROOT/src/etc/systemd/system/borg-backup.service" \
     "$PROJECT_ROOT/src/etc/systemd/system/borg-backup.timer" \
     "$PROJECT_ROOT/src/etc/logrotate.d/borg-backup" \
     "$PROJECT_ROOT/src/usr/local/lib/tmpfiles.d/borg-backup.conf"; do
-    [[ $(stat -c '%a' -- "$artifact") == 644 ]] || integration_modes=no
+    [[ -f $artifact && ! -L $artifact ]] || integration_checkout_modes=no
+    mode=$(stat -c '%a' -- "$artifact")
+    (( (8#$mode & 0133) == 0 )) || integration_checkout_modes=no
 done
-[[ $integration_modes == yes ]] \
-    && test_record ok "artefatos de integração possuem modo distribuído 0644" \
-    || test_record "not ok" "artefatos de integração possuem modo distribuído 0644"
+if [[ $integration_checkout_modes == yes ]]; then
+    test_record ok "artefatos de integração são regulares e não executáveis no checkout"
+else
+    test_record "not ok" "artefatos de integração são regulares e não executáveis no checkout"
+fi
 
 build_tools=(
     "$PROJECT_ROOT/packaging/build-package.sh"
